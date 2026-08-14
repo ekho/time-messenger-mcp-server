@@ -5,6 +5,7 @@ import type {
   Post,
   PostList,
   Thread,
+  UserThreads,
   ThreadStats,
   ThreadsResponse,
   ChannelUnread,
@@ -372,8 +373,8 @@ export class TimeClient {
 
   // ========== Threads ==========
 
-  async getUserThreads(userId: string, teamId: string): Promise<Thread[]> {
-    return this.request<Thread[]>(
+  async getUserThreads(userId: string, teamId: string): Promise<UserThreads> {
+    return this.request<UserThreads>(
       'GET',
       `/users/${enc(userId)}/teams/${enc(teamId)}/threads`
     );
