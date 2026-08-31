@@ -1,4 +1,4 @@
-# time-messenger-mcp-server
+# @ekho/time-messenger-mcp-server
 
 MCP (Model Context Protocol) сервер для корпоративного мессенджера [Time Messenger](https://time-messenger.ru/) (на базе Mattermost) от Т-Банка.
 
@@ -9,20 +9,20 @@ MCP (Model Context Protocol) сервер для корпоративного м
 ### Вариант 1: npx (без установки)
 
 ```bash
-npx time-messenger-mcp-server
+npx @ekho/time-messenger-mcp-server
 ```
 
 ### Вариант 2: глобальная установка
 
 ```bash
-npm install -g time-messenger-mcp-server
+npm install -g @ekho/time-messenger-mcp-server
 time-messenger-mcp-server
 ```
 
 ### Вариант 3: из исходников
 
 ```bash
-git clone https://github.com/BarredEwe/time-messenger-mcp-server.git
+git clone https://github.com/ekho/time-messenger-mcp-server.git
 cd time-messenger-mcp-server
 npm install
 npm run build
@@ -75,7 +75,7 @@ Personal Access Token — постоянный токен, который не �
   "mcpServers": {
     "time": {
       "command": "npx",
-      "args": ["-y", "time-messenger-mcp-server"],
+      "args": ["-y", "@ekho/time-messenger-mcp-server"],
       "env": {
         "TIME_URL": "https://your-instance.time-messenger.ru",
         "TIME_TOKEN": "your_token_here"
@@ -91,7 +91,7 @@ Personal Access Token — постоянный токен, который не �
   "mcpServers": {
     "time": {
       "command": "npx",
-      "args": ["-y", "time-messenger-mcp-server"],
+      "args": ["-y", "@ekho/time-messenger-mcp-server"],
       "env": {
         "TIME_URL": "https://your-instance.time-messenger.ru",
         "TIME_LOGIN_ID": "your@email.com",
@@ -111,7 +111,7 @@ Personal Access Token — постоянный токен, который не �
   "mcp": {
     "time": {
       "type": "local",
-      "command": ["npx", "-y", "time-messenger-mcp-server"],
+      "command": ["npx", "-y", "@ekho/time-messenger-mcp-server"],
       "enabled": true,
       "environment": {
         "TIME_URL": "https://your-instance.time-messenger.ru",
@@ -125,7 +125,7 @@ Personal Access Token — постоянный токен, который не �
 ### Любой MCP-совместимый клиент
 
 ```bash
-npx time-messenger-mcp-server
+npx @ekho/time-messenger-mcp-server
 ```
 
 Сервер использует stdio transport — стандартный для MCP.
@@ -247,7 +247,7 @@ src/
 
 ## Требования
 
-- Node.js 18+
+- Node.js 20.19+
 
 ## Лицензия
 
