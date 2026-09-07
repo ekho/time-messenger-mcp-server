@@ -167,6 +167,18 @@ npx time-messenger-mcp-server
 | `search_channels` | Поиск каналов |
 | `get_channel_unread` | Непрочитанные сообщения в канале |
 
+### Категории каналов
+
+| Инструмент | Описание |
+|---|---|
+| `time_list_channel_categories` | Список категорий каналов в порядке отображения для команды |
+| `time_create_channel_category` | Создать пустую пользовательскую категорию каналов |
+| `time_update_channel_category` | Изменить название, сортировку или настройки пользовательской категории |
+| `time_delete_channel_category` | Удалить категорию каналов |
+| `time_reorder_channel_categories` | Изменить порядок категорий каналов |
+| `time_move_channel_to_category` | Переместить канал в существующую пользовательскую категорию |
+| `time_set_channel_favorite` | Добавить канал в избранное или убрать его из избранного |
+
 ### Команды
 
 | Инструмент | Описание |
@@ -220,6 +232,8 @@ src/
 │   ├── messages.ts       # Сообщения
 │   ├── threads.ts        # Треды
 │   ├── channels.ts       # Каналы
+│   ├── channel-categories.ts          # Категории каналов
+│   ├── channel-category-membership.ts # Участие каналов в категориях
 │   ├── teams.ts          # Команды
 │   ├── users.ts          # Пользователи
 │   └── types.ts          # Типы инструментов
