@@ -99,9 +99,15 @@ export interface ChannelUnread {
   mention_count: number
 }
 
-export interface MarkChannelsReadResponse {
-  status: string
-  last_viewed_at_times: Record<string, number>
+export interface MarkChannelReadFailure {
+  readonly channelId: string
+  readonly message: string
+  readonly statusCode?: number
+}
+
+export interface MarkChannelsReadResult {
+  readonly successes: readonly string[]
+  readonly failures: readonly MarkChannelReadFailure[]
 }
 
 export interface TeamUnread {
@@ -126,10 +132,12 @@ export interface ErrorInfo {
 export class TimeApiError extends Error {
   statusCode: number
   errorInfo?: ErrorInfo
+  readonly retryAfterMs?: number
 
-  constructor(message: string, statusCode: number) {
+  constructor(message: string, statusCode: number, retryAfterMs?: number) {
     super(message)
     this.name = 'TimeApiError'
     this.statusCode = statusCode
+    this.retryAfterMs = retryAfterMs
   }
 }
