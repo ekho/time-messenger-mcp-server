@@ -666,6 +666,53 @@ describe('TimeClient', () => {
     });
   });
 
+  describe('Reaction methods', () => {
+    it('addReaction posts the complete Mattermost reaction body', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({ user_id: 'u1', post_id: 'p1', emoji_name: '+1' }));
+
+      await client.addReaction('u1', 'p1', '+1');
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/reactions',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ user_id: 'u1', post_id: 'p1', emoji_name: '+1' }),
+        })
+      );
+    });
+
+    it('removeReaction percent-encodes +1 in the reaction path', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({}, 204));
+
+      await client.removeReaction('u1', 'p1', '+1');
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/users/u1/posts/p1/reactions/%2B1',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+    });
+
+    it('getReactions lists reactions for a post', async () => {
+      const reactions = [{ user_id: 'u1', post_id: 'p1', emoji_name: '100', create_at: 1 }];
+      fetchSpy.mockReturnValue(mockFetchResponse(reactions));
+
+      await expect(client.getReactions('p1')).resolves.toEqual(reactions);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/posts/p1/reactions',
+        expect.objectContaining({ method: 'GET' })
+      );
+    });
+
+    it('preserves typed errors for reaction requests', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse({ message: 'reaction denied' }, 403));
+
+      await expect(client.addReaction('u1', 'p1', '+1')).rejects.toMatchObject({
+        statusCode: 403,
+        message: 'reaction denied',
+      });
+    });
+  });
+
   describe('Thread methods', () => {
     it('getUserThreads returns the wrapped thread response', async () => {
       const response = {

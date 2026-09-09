@@ -76,6 +76,13 @@ export interface PostList {
   prev_post_id: string
 }
 
+export interface Reaction {
+  user_id: string
+  post_id: string
+  emoji_name: string
+  create_at: number
+}
+
 export interface Thread {
   id: string
   create_at: number

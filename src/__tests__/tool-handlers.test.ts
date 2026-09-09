@@ -4,6 +4,8 @@ import { threadTools } from '../tools/threads.js';
 import { channelTools } from '../tools/channels.js';
 import { teamTools } from '../tools/teams.js';
 import { userTools } from '../tools/users.js';
+import { reactionTools } from '../tools/reactions.js';
+import { allTools } from '../tools/registry.js';
 import { TimeApiError, TimeTransportError } from '../types/time-api.js';
 import type { TimeClient } from '../client/time-client.js';
 import type { Post, PostList, Channel, Team, User, Thread, ThreadStats, ChannelUnread, MarkChannelsReadResult, TeamUnread, SearchResult } from '../types/time-api.js';
@@ -30,6 +32,9 @@ function createMockClient(overrides: Partial<TimeClient> = {}): TimeClient {
     searchChannels: vi.fn().mockResolvedValue([] as Channel[]),
     getChannelUnread: vi.fn().mockResolvedValue({ channel_id: 'ch1', msg_count: 3, mention_count: 0 } as ChannelUnread),
     createPost: vi.fn().mockResolvedValue({ id: 'p1', create_at: 1000 } as Post),
+    addReaction: vi.fn().mockResolvedValue({}),
+    removeReaction: vi.fn().mockResolvedValue(undefined),
+    getReactions: vi.fn().mockResolvedValue([]),
     getPostsForChannel: vi.fn().mockResolvedValue({ order: [], posts: {}, next_post_id: '', prev_post_id: '' } as PostList),
     getPostThread: vi.fn().mockResolvedValue({ order: [], posts: {}, next_post_id: '', prev_post_id: '' } as PostList),
     searchPosts: vi.fn().mockResolvedValue({ order: [], posts: {} } as SearchResult),
@@ -703,5 +708,89 @@ describe('userTools handlers', () => {
     const tool = findTool(userTools, 'search_users');
     await tool.handler(client, { term: 'john' });
     expect(client.searchUsers).toHaveBeenCalledWith('john');
+  });
+});
+
+describe('reactionTools handlers', () => {
+  let client: TimeClient;
+
+  beforeEach(() => {
+    client = createMockClient({
+      addReaction: vi.fn().mockResolvedValue({}),
+      removeReaction: vi.fn().mockResolvedValue(undefined),
+      getReactions: vi.fn().mockResolvedValue([]),
+    });
+  });
+
+  it.each([
+    ['👍', '+1'],
+    [':-1:', '-1'],
+    [':100:', '100'],
+  ])('add_reaction normalizes %s before the client call', async (emoji, canonicalEmoji) => {
+    const tool = findTool(reactionTools, 'add_reaction');
+
+    await tool.handler(client, { post_id: 'p1', emoji }, userId);
+
+    expect(client.addReaction).toHaveBeenCalledWith(userId, 'p1', canonicalEmoji);
+  });
+
+  it('remove_reaction passes the canonical emoji to the client', async () => {
+    const tool = findTool(reactionTools, 'remove_reaction');
+
+    await tool.handler(client, { post_id: 'p1', emoji: '👍' }, userId);
+
+    expect(client.removeReaction).toHaveBeenCalledWith(userId, 'p1', '+1');
+  });
+
+  it('get_reactions resolves authors and retains raw IDs that do not resolve', async () => {
+    vi.mocked(client.getReactions).mockResolvedValue([
+      { user_id: 'u1', post_id: 'p1', emoji_name: '+1', create_at: 1 },
+      { user_id: 'u2', post_id: 'p1', emoji_name: '+1', create_at: 2 },
+      { user_id: 'u1', post_id: 'p1', emoji_name: '100', create_at: 3 },
+    ]);
+    vi.mocked(client.getUsersByIds).mockResolvedValue([{
+      id: 'u1', create_at: 0, update_at: 0, delete_at: 0, username: 'alice',
+      first_name: '', last_name: '', nickname: '', email: '', auth_data: '',
+      auth_service: '', roles: '', locale: 'en', notify_props: {},
+    } satisfies User]);
+    const tool = findTool(reactionTools, 'get_reactions');
+
+    const result = await tool.handler(client, { post_id: 'p1' }, userId);
+
+    expect(client.getUsersByIds).toHaveBeenCalledWith(['u1', 'u2']);
+    expect(result.content[0].text).toBe('Reactions:\n\n+1: @alice, @u2\n100: @alice');
+  });
+
+  it('propagates reaction client errors', async () => {
+    const failure = new TimeApiError('reaction denied', 403);
+    vi.mocked(client.addReaction).mockRejectedValue(failure);
+    const tool = findTool(reactionTools, 'add_reaction');
+
+    await expect(tool.handler(client, { post_id: 'p1', emoji: '+1' }, userId)).rejects.toBe(failure);
+  });
+});
+
+describe('registered tool order', () => {
+  it('places reactions after messages while preserving existing groups and channel reads', async () => {
+    const names = allTools.map((tool) => tool.name);
+    const messageLastIndex = names.lastIndexOf('search_messages');
+    const reactionFirstIndex = names.indexOf('add_reaction');
+    const threadFirstIndex = names.indexOf('list_threads');
+    const channelFirstIndex = names.indexOf('list_channels');
+
+    expect(messageLastIndex).toBeGreaterThanOrEqual(0);
+    expect(reactionFirstIndex).toBeGreaterThan(messageLastIndex);
+    expect(threadFirstIndex).toBeGreaterThan(reactionFirstIndex);
+    expect(channelFirstIndex).toBeGreaterThan(threadFirstIndex);
+    expect(names).toContain('mark_channels_read');
+
+    const client = createMockClient({
+      markChannelsRead: vi.fn().mockResolvedValue({ successes: ['ch1'], failures: [] }),
+    });
+    const tool = findTool(allTools, 'mark_channels_read');
+    const result = await tool.handler(client, { mode: 'selected', channel_ids: ['ch1'] }, userId);
+
+    expect(client.markChannelsRead).toHaveBeenCalledWith(userId, ['ch1']);
+    expect(result.content[0].text).toBe('Marked 1 channel(s) as read.');
   });
 });

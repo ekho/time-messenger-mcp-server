@@ -10,16 +10,9 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { TimeClient } from './client/time-client.js';
 import { loadSavedAuth, saveAuth } from './client/auth-store.js';
-import { messageTools } from './tools/messages.js';
-import { threadTools } from './tools/threads.js';
-import { channelTools } from './tools/channels.js';
-import { teamTools } from './tools/teams.js';
-import { userTools } from './tools/users.js';
 import { authTools } from './tools/auth.js';
+import { allTools } from './tools/registry.js';
 import type { MfaLoginResult } from './tools/auth.js';
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const allTools: any[] = [...authTools, ...messageTools, ...threadTools, ...channelTools, ...teamTools, ...userTools];
 
 class TimeMcpServer {
   private server: Server;
@@ -171,7 +164,7 @@ class TimeMcpServer {
 
       try {
         if (name === 'login_with_mfa') {
-          const result = (await tool.handler(
+          const result = (await authTools[0].handler(
             null,
             args,
             '',
