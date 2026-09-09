@@ -34,28 +34,31 @@ describe('formatPostList', () => {
   });
 
   it('formats a single post', () => {
-    const post = makePost({ id: 'p1', message: 'Hello' });
+    const post = makePost({ id: 'p1', message: 'Hello', user_id: 'u1' });
     const postList = makePostList([post]);
-    const result = formatPostList(postList);
+    const result = formatPostList(postList, new Map([['u1', 'alice']]));
     expect(result).toContain('Hello');
+    expect(result).toContain('Post ID: p1');
+    expect(result).toContain('Author: @alice');
     expect(result).toContain('---');
   });
 
-  it('formats multiple posts in reverse order', () => {
+  it('formats multiple posts oldest first', () => {
     const p1 = makePost({ id: 'p1', message: 'First', create_at: 1000 });
     const p2 = makePost({ id: 'p2', message: 'Second', create_at: 2000 });
-    const postList = makePostList([p1, p2], ['p1', 'p2']);
+    const postList = makePostList([p1, p2], ['p2', 'p1']);
     const result = formatPostList(postList);
-    const firstIdx = result.indexOf('Second');
-    const secondIdx = result.indexOf('First');
+    const firstIdx = result.indexOf('First');
+    const secondIdx = result.indexOf('Second');
     expect(firstIdx).toBeLessThan(secondIdx);
   });
 
   it('marks replies with "(reply)"', () => {
     const post = makePost({ id: 'p2', message: 'Reply', root_id: 'p1' });
     const postList = makePostList([post]);
-    const result = formatPostList(postList);
+    const result = formatPostList(postList, new Map([['u1', 'alice']]));
     expect(result).toContain('(reply)');
+    expect(result).toContain('Root ID: p1');
   });
 
   it('does not mark root posts as replies', () => {
@@ -63,6 +66,15 @@ describe('formatPostList', () => {
     const postList = makePostList([post]);
     const result = formatPostList(postList);
     expect(result).not.toContain('(reply)');
+    expect(result).not.toContain('Root ID:');
+  });
+
+  it('uses the raw user ID when an author is unresolved', () => {
+    const post = makePost({ id: 'p1', message: 'Hello', user_id: 'missing-user' });
+
+    const result = formatPostList(makePostList([post]), new Map());
+
+    expect(result).toContain('Author: @missing-user');
   });
 
   it('deduplicates posts with same ID in order array', () => {
@@ -98,23 +110,34 @@ describe('formatSearchResult', () => {
   });
 
   it('formats search results with count', () => {
-    const post = makePost({ id: 'p1', message: 'Found this', channel_id: 'ch1' });
+    const post = makePost({ id: 'p1', message: 'Found this', channel_id: 'ch1', user_id: 'u1' });
     const result = formatSearchResult({
       order: ['p1'],
       posts: { p1: post },
-    });
+    }, new Map([['u1', 'alice']]));
     expect(result).toContain('Found 1 message(s)');
     expect(result).toContain('Found this');
     expect(result).toContain('ch1');
+    expect(result).toContain('Post ID: p1');
+    expect(result).toContain('Author: @alice');
+  });
+
+  it('uses the raw user ID for an unresolved search author', () => {
+    const post = makePost({ id: 'p1', message: 'Found this', user_id: 'missing-user' });
+
+    const result = formatSearchResult({ order: ['p1'], posts: { p1: post } }, new Map());
+
+    expect(result).toContain('Author: @missing-user');
   });
 
   it('formats multiple search results', () => {
-    const p1 = makePost({ id: 'p1', message: 'First', channel_id: 'ch1' });
-    const p2 = makePost({ id: 'p2', message: 'Second', channel_id: 'ch2' });
+    const p1 = makePost({ id: 'p1', message: 'Older', channel_id: 'ch1', create_at: 1000 });
+    const p2 = makePost({ id: 'p2', message: 'Newer', channel_id: 'ch2', create_at: 2000 });
     const result = formatSearchResult({
-      order: ['p1', 'p2'],
+      order: ['p2', 'p1'],
       posts: { p1, p2 },
     });
     expect(result).toContain('Found 2 message(s)');
+    expect(result.indexOf('Older')).toBeLessThan(result.indexOf('Newer'));
   });
 });

@@ -7,6 +7,7 @@ import type {
   Thread,
   ThreadStats,
   ThreadsResponse,
+  UserThreads,
   ChannelUnread,
   MarkChannelReadFailure,
   MarkChannelsReadResult,
@@ -14,7 +15,7 @@ import type {
   SearchResult,
   ErrorInfo,
 } from '../types/time-api.js';
-import { TimeApiError } from '../types/time-api.js';
+import { TimeApiError, TimeTransportError } from '../types/time-api.js';
 
 // Encode every caller-supplied id before it is interpolated into a URL path,
 // so a value containing `/`, `?`, `#` or `..` cannot redirect the request to a
@@ -51,11 +52,17 @@ async function fetchWithTimeout(url: string, options: RequestInit): Promise<Resp
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...options, signal: controller.signal });
-  } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      throw new TimeApiError(`Time API request timed out after ${timeoutMs}ms`, 504);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new TimeTransportError(`Time API request timed out after ${timeoutMs}ms`, {
+        cause: error,
+        statusCode: 504,
+      });
     }
-    throw err;
+    if (error instanceof TypeError) {
+      throw new TimeTransportError(error.message, { cause: error });
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -179,6 +186,10 @@ export class TimeClient {
     return this.request<User>('GET', `/users/${enc(userId)}`);
   }
 
+  async getUsersByIds(userIds: string[]): Promise<User[]> {
+    return this.request<User[]>('POST', '/users/ids', userIds);
+  }
+
   async searchUsers(term: string): Promise<User[]> {
     return this.request<User[]>('POST', '/users/search', { term });
   }
@@ -251,6 +262,23 @@ export class TimeClient {
         if (error instanceof TypeError) {
           if (attempts >= MARK_READ_MAX_ATTEMPTS) {
             return { channelId, message: error.message };
+          }
+
+          const backoffMs = MARK_READ_RETRY_BASE_DELAY_MS * (2 ** (attempts - 1));
+          await new Promise(resolve => setTimeout(
+            resolve,
+            backoffMs + Math.floor(Math.random() * MARK_READ_RETRY_BASE_DELAY_MS)
+          ));
+          continue;
+        }
+
+        if (error instanceof TimeTransportError) {
+          if (attempts >= MARK_READ_MAX_ATTEMPTS) {
+            return {
+              channelId,
+              message: error.message,
+              ...(error.statusCode === undefined ? {} : { statusCode: error.statusCode }),
+            };
           }
 
           const backoffMs = MARK_READ_RETRY_BASE_DELAY_MS * (2 ** (attempts - 1));
@@ -372,8 +400,8 @@ export class TimeClient {
 
   // ========== Threads ==========
 
-  async getUserThreads(userId: string, teamId: string): Promise<Thread[]> {
-    return this.request<Thread[]>(
+  async getUserThreads(userId: string, teamId: string): Promise<UserThreads> {
+    return this.request<UserThreads>(
       'GET',
       `/users/${enc(userId)}/teams/${enc(teamId)}/threads`
     );

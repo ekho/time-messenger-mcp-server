@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatThread, formatThreads } from '../tools/threads.js';
+import { extractThreads, formatThread, formatThreads } from '../tools/threads.js';
 import type { Thread, Post, User } from '../types/time-api.js';
 
 const makePost = (overrides: Partial<Post> & { id: string; message: string }): Post => ({
@@ -64,6 +64,12 @@ describe('formatThread', () => {
     const result = formatThread(thread);
     expect(result).toContain('Thread ID: t2');
     expect(result).not.toContain('Root message');
+  });
+});
+
+describe('extractThreads', () => {
+  it('returns an empty list for an absent response', () => {
+    expect(extractThreads(undefined)).toEqual([]);
   });
 });
 

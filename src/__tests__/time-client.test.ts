@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { TimeClient } from '../client/time-client.js';
-import { TimeApiError } from '../types/time-api.js';
+import { TimeApiError, TimeTransportError } from '../types/time-api.js';
 
 function mockFetchResponse(data: unknown, status = 200, headers: Record<string, string> = {}) {
   return Promise.resolve({
@@ -157,9 +157,32 @@ describe('TimeClient', () => {
         expect((err as TimeApiError).message).toBe('Not Found');
       }
     });
+
+    it('classifies fetch failures as TimeTransportError', async () => {
+      fetchSpy.mockRejectedValue(new TypeError('network unavailable'));
+
+      await expect(client.getUsersByIds(['u1'])).rejects.toBeInstanceOf(TimeTransportError);
+    });
   });
 
   describe('User methods', () => {
+    it('getUsersByIds sends one bulk POST with the requested IDs', async () => {
+      const users = [{ id: 'u1', username: 'alice' }, { id: 'u2', username: 'bob' }];
+      fetchSpy.mockReturnValue(mockFetchResponse(users));
+
+      const result = await client.getUsersByIds(['u1', 'u2']);
+
+      expect(result).toEqual(users);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://time.test.com/api/v4/users/ids',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify(['u1', 'u2']),
+        })
+      );
+    });
+
     it('getMe calls GET /users/me', async () => {
       fetchSpy.mockReturnValue(mockFetchResponse({ id: 'u1' }));
       await client.getMe();
@@ -644,9 +667,18 @@ describe('TimeClient', () => {
   });
 
   describe('Thread methods', () => {
-    it('getUserThreads calls correct path', async () => {
-      fetchSpy.mockReturnValue(mockFetchResponse([]));
-      await client.getUserThreads('u1', 't1');
+    it('getUserThreads returns the wrapped thread response', async () => {
+      const response = {
+        threads: [],
+        total: 0,
+        total_unread_threads: 0,
+        total_unread_mentions: 0,
+      };
+      fetchSpy.mockReturnValue(mockFetchResponse(response));
+
+      const result = await client.getUserThreads('u1', 't1');
+
+      expect(result).toEqual(response);
       expect(fetchSpy).toHaveBeenCalledWith(
         'https://time.test.com/api/v4/users/u1/teams/t1/threads',
         expect.anything()

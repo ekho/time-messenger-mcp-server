@@ -100,6 +100,13 @@ export interface ThreadsResponse {
   total_unread_mentions: number
 }
 
+export interface UserThreads {
+  threads: Thread[] | null
+  total: number
+  total_unread_threads: number
+  total_unread_mentions: number
+}
+
 export interface ChannelUnread {
   channel_id: string
   msg_count: number
@@ -146,5 +153,15 @@ export class TimeApiError extends Error {
     this.name = 'TimeApiError'
     this.statusCode = statusCode
     this.retryAfterMs = retryAfterMs
+  }
+}
+
+export class TimeTransportError extends Error {
+  readonly statusCode?: number
+
+  constructor(message: string, options?: ErrorOptions & { readonly statusCode?: number }) {
+    super(message, options)
+    this.name = 'TimeTransportError'
+    this.statusCode = options?.statusCode
   }
 }

@@ -4,6 +4,7 @@ import { threadTools } from '../tools/threads.js';
 import { channelTools } from '../tools/channels.js';
 import { teamTools } from '../tools/teams.js';
 import { userTools } from '../tools/users.js';
+import { TimeApiError, TimeTransportError } from '../types/time-api.js';
 import type { TimeClient } from '../client/time-client.js';
 import type { Post, PostList, Channel, Team, User, Thread, ThreadStats, ChannelUnread, MarkChannelsReadResult, TeamUnread, SearchResult } from '../types/time-api.js';
 
@@ -16,6 +17,7 @@ function createMockClient(overrides: Partial<TimeClient> = {}): TimeClient {
   return {
     getMe: vi.fn().mockResolvedValue({ id: 'me', username: 'me' } as User),
     getUser: vi.fn().mockResolvedValue({ id: 'u1', username: 'user1' } as User),
+    getUsersByIds: vi.fn().mockResolvedValue([]),
     searchUsers: vi.fn().mockResolvedValue([] as User[]),
     getTeamsForUser: vi.fn().mockResolvedValue([] as Team[]),
     getTeam: vi.fn().mockResolvedValue({ id: 't1', display_name: 'Team' } as Team),
@@ -31,7 +33,12 @@ function createMockClient(overrides: Partial<TimeClient> = {}): TimeClient {
     getPostsForChannel: vi.fn().mockResolvedValue({ order: [], posts: {}, next_post_id: '', prev_post_id: '' } as PostList),
     getPostThread: vi.fn().mockResolvedValue({ order: [], posts: {}, next_post_id: '', prev_post_id: '' } as PostList),
     searchPosts: vi.fn().mockResolvedValue({ order: [], posts: {} } as SearchResult),
-    getUserThreads: vi.fn().mockResolvedValue([] as Thread[]),
+    getUserThreads: vi.fn().mockResolvedValue({
+      threads: [],
+      total: 0,
+      total_unread_threads: 0,
+      total_unread_mentions: 0,
+    }),
     getThreadsStats: vi.fn().mockResolvedValue({ total_unread_threads: 2, total_unread_mentions: 1 } as ThreadStats),
     getUserThread: vi.fn().mockResolvedValue({ id: 'th1', reply_count: 3 } as Thread),
     startFollowingThread: vi.fn().mockResolvedValue(undefined),
@@ -81,6 +88,152 @@ describe('messageTools handlers', () => {
     expect(client.getPostsForChannel).toHaveBeenCalledWith('ch1', 2, 10);
   });
 
+  it('get_channel_messages resolves unique authors in bulk and formats their identities', async () => {
+    const post = {
+      id: 'p1', create_at: 1000, update_at: 0, delete_at: 0, edit_at: 0,
+      user_id: 'u1', channel_id: 'ch1', root_id: '', parent_id: '', original_id: '',
+      message: 'Hello', type: '', props: {}, hashtags: '', pending_post_id: '', metadata: {},
+    } satisfies Post;
+    const secondPost = {
+      id: 'p2', create_at: 2000, update_at: 0, delete_at: 0, edit_at: 0,
+      user_id: 'u2', channel_id: 'ch1', root_id: '', parent_id: '', original_id: '',
+      message: 'Hello again', type: '', props: {}, hashtags: '', pending_post_id: '', metadata: {},
+    } satisfies Post;
+    vi.mocked(client.getPostsForChannel).mockResolvedValue({
+      order: ['p1', 'p2', 'p1'], posts: { p1: post, p2: secondPost }, next_post_id: '', prev_post_id: '',
+    });
+    vi.mocked(client.getUsersByIds).mockResolvedValue([{
+      id: 'u1', create_at: 0, update_at: 0, delete_at: 0, username: 'alice',
+      first_name: '', last_name: '', nickname: '', email: '', auth_data: '',
+      auth_service: '', roles: '', locale: 'en', notify_props: {},
+    } satisfies User, {
+      id: 'u2', create_at: 0, update_at: 0, delete_at: 0, username: 'bob',
+      first_name: '', last_name: '', nickname: '', email: '', auth_data: '',
+      auth_service: '', roles: '', locale: 'en', notify_props: {},
+    } satisfies User]);
+
+    const tool = findTool(messageTools, 'get_channel_messages');
+    const result = await tool.handler(client, { channel_id: 'ch1' });
+
+    expect(client.getUsersByIds).toHaveBeenCalledTimes(1);
+    expect(client.getUsersByIds).toHaveBeenCalledWith(['u1', 'u2']);
+    expect(result.content[0].text).toContain('Post ID: p1');
+    expect(result.content[0].text).toContain('Author: @alice');
+  });
+
+  it('retries unresolved authors while caching successful resolutions', async () => {
+    const post = {
+      id: 'p1', create_at: 1000, update_at: 0, delete_at: 0, edit_at: 0,
+      user_id: 'u1', channel_id: 'ch1', root_id: '', parent_id: '', original_id: '',
+      message: 'Hello', type: '', props: {}, hashtags: '', pending_post_id: '', metadata: {},
+    } satisfies Post;
+    vi.mocked(client.getPostsForChannel).mockResolvedValue({
+      order: ['p1'], posts: { p1: post }, next_post_id: '', prev_post_id: '',
+    });
+    const tool = findTool(messageTools, 'get_channel_messages');
+    await tool.handler(client, { channel_id: 'ch1' });
+    await tool.handler(client, { channel_id: 'ch1' });
+
+    expect(client.getUsersByIds).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not request a successfully cached author again', async () => {
+    const post = {
+      id: 'p1', create_at: 1000, update_at: 0, delete_at: 0, edit_at: 0,
+      user_id: 'u1', channel_id: 'ch1', root_id: '', parent_id: '', original_id: '',
+      message: 'Hello', type: '', props: {}, hashtags: '', pending_post_id: '', metadata: {},
+    } satisfies Post;
+    vi.mocked(client.getPostsForChannel).mockResolvedValue({
+      order: ['p1'], posts: { p1: post }, next_post_id: '', prev_post_id: '',
+    });
+    vi.mocked(client.getUsersByIds).mockResolvedValue([{
+      id: 'u1', create_at: 0, update_at: 0, delete_at: 0, username: 'alice',
+      first_name: '', last_name: '', nickname: '', email: '', auth_data: '',
+      auth_service: '', roles: '', locale: 'en', notify_props: {},
+    } satisfies User]);
+
+    const tool = findTool(messageTools, 'get_channel_messages');
+    await tool.handler(client, { channel_id: 'ch1' });
+    const secondResult = await tool.handler(client, { channel_id: 'ch1' });
+
+    expect(client.getUsersByIds).toHaveBeenCalledTimes(1);
+    expect(secondResult.content[0].text).toContain('Author: @alice');
+  });
+
+  it('falls back after a bulk author failure and retries on the next call', async () => {
+    const post = {
+      id: 'p1', create_at: 1000, update_at: 0, delete_at: 0, edit_at: 0,
+      user_id: 'u1', channel_id: 'ch1', root_id: '', parent_id: '', original_id: '',
+      message: 'Hello', type: '', props: {}, hashtags: '', pending_post_id: '', metadata: {},
+    } satisfies Post;
+    const user = {
+      id: 'u1', create_at: 0, update_at: 0, delete_at: 0, username: 'alice',
+      first_name: '', last_name: '', nickname: '', email: '', auth_data: '',
+      auth_service: '', roles: '', locale: 'en', notify_props: {},
+    } satisfies User;
+    vi.mocked(client.getPostsForChannel).mockResolvedValue({
+      order: ['p1'], posts: { p1: post }, next_post_id: '', prev_post_id: '',
+    });
+    vi.mocked(client.getUsersByIds)
+      .mockRejectedValueOnce(new TimeApiError('upstream unavailable', 503))
+      .mockResolvedValueOnce([user]);
+
+    const tool = findTool(messageTools, 'get_channel_messages');
+    const fallbackResult = await tool.handler(client, { channel_id: 'ch1' });
+    const retryResult = await tool.handler(client, { channel_id: 'ch1' });
+
+    expect(fallbackResult.content[0].text).toContain('Author: @u1');
+    expect(retryResult.content[0].text).toContain('Author: @alice');
+    expect(client.getUsersByIds).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['a transport failure', new TimeTransportError('network unavailable')],
+    ['HTTP 429', new TimeApiError('too many requests', 429)],
+  ])('falls back after %s during bulk author lookup and retries the ID', async (_description, failure) => {
+    const post = {
+      id: 'p1', create_at: 1000, update_at: 0, delete_at: 0, edit_at: 0,
+      user_id: 'u1', channel_id: 'ch1', root_id: '', parent_id: '', original_id: '',
+      message: 'Hello', type: '', props: {}, hashtags: '', pending_post_id: '', metadata: {},
+    } satisfies Post;
+    const user = {
+      id: 'u1', create_at: 0, update_at: 0, delete_at: 0, username: 'alice',
+      first_name: '', last_name: '', nickname: '', email: '', auth_data: '',
+      auth_service: '', roles: '', locale: 'en', notify_props: {},
+    } satisfies User;
+    vi.mocked(client.getPostsForChannel).mockResolvedValue({
+      order: ['p1'], posts: { p1: post }, next_post_id: '', prev_post_id: '',
+    });
+    vi.mocked(client.getUsersByIds)
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce([user]);
+
+    const tool = findTool(messageTools, 'get_channel_messages');
+    const fallbackResult = await tool.handler(client, { channel_id: 'ch1' });
+    const retryResult = await tool.handler(client, { channel_id: 'ch1' });
+
+    expect(fallbackResult.content[0].text).toContain('Author: @u1');
+    expect(retryResult.content[0].text).toContain('Author: @alice');
+    expect(client.getUsersByIds).toHaveBeenCalledTimes(2);
+  });
+
+  it('propagates unrelated programming errors from bulk author lookup', async () => {
+    const post = {
+      id: 'p1', create_at: 1000, update_at: 0, delete_at: 0, edit_at: 0,
+      user_id: 'u1', channel_id: 'ch1', root_id: '', parent_id: '', original_id: '',
+      message: 'Hello', type: '', props: {}, hashtags: '', pending_post_id: '', metadata: {},
+    } satisfies Post;
+    const programmingError = new TypeError('cannot read properties of undefined');
+    vi.mocked(client.getPostsForChannel).mockResolvedValue({
+      order: ['p1'], posts: { p1: post }, next_post_id: '', prev_post_id: '',
+    });
+    vi.mocked(client.getUsersByIds).mockRejectedValueOnce(programmingError);
+
+    const tool = findTool(messageTools, 'get_channel_messages');
+
+    await expect(tool.handler(client, { channel_id: 'ch1' })).rejects.toBe(programmingError);
+  });
+
   it('get_channel_messages uses defaults', async () => {
     const tool = findTool(messageTools, 'get_channel_messages');
     await tool.handler(client, { channel_id: 'ch1' });
@@ -107,10 +260,54 @@ describe('messageTools handlers', () => {
     expect(client.getPostThread).toHaveBeenCalledWith('p1');
   });
 
+  it('get_thread_messages resolves and formats reply authors', async () => {
+    const post = {
+      id: 'p2', create_at: 2000, update_at: 0, delete_at: 0, edit_at: 0,
+      user_id: 'u2', channel_id: 'ch1', root_id: 'p1', parent_id: '', original_id: '',
+      message: 'Reply', type: '', props: {}, hashtags: '', pending_post_id: '', metadata: {},
+    } satisfies Post;
+    vi.mocked(client.getPostThread).mockResolvedValue({
+      order: ['p2'], posts: { p2: post }, next_post_id: '', prev_post_id: '',
+    });
+    vi.mocked(client.getUsersByIds).mockResolvedValue([{
+      id: 'u2', create_at: 0, update_at: 0, delete_at: 0, username: 'bob',
+      first_name: '', last_name: '', nickname: '', email: '', auth_data: '',
+      auth_service: '', roles: '', locale: 'en', notify_props: {},
+    } satisfies User]);
+
+    const tool = findTool(messageTools, 'get_thread_messages');
+    const result = await tool.handler(client, { post_id: 'p1' });
+
+    expect(client.getUsersByIds).toHaveBeenCalledWith(['u2']);
+    expect(result.content[0].text).toContain('Root ID: p1');
+    expect(result.content[0].text).toContain('Author: @bob');
+  });
+
   it('search_messages calls searchPosts', async () => {
     const tool = findTool(messageTools, 'search_messages');
     await tool.handler(client, { team_id: 't1', terms: 'hello' });
     expect(client.searchPosts).toHaveBeenCalledWith('t1', 'hello');
+  });
+
+  it('search_messages resolves and formats authors', async () => {
+    const post = {
+      id: 'p1', create_at: 1000, update_at: 0, delete_at: 0, edit_at: 0,
+      user_id: 'u3', channel_id: 'ch1', root_id: '', parent_id: '', original_id: '',
+      message: 'Found', type: '', props: {}, hashtags: '', pending_post_id: '', metadata: {},
+    } satisfies Post;
+    vi.mocked(client.searchPosts).mockResolvedValue({ order: ['p1'], posts: { p1: post } });
+    vi.mocked(client.getUsersByIds).mockResolvedValue([{
+      id: 'u3', create_at: 0, update_at: 0, delete_at: 0, username: 'carol',
+      first_name: '', last_name: '', nickname: '', email: '', auth_data: '',
+      auth_service: '', roles: '', locale: 'en', notify_props: {},
+    } satisfies User]);
+
+    const tool = findTool(messageTools, 'search_messages');
+    const result = await tool.handler(client, { team_id: 't1', terms: 'Found' });
+
+    expect(client.getUsersByIds).toHaveBeenCalledWith(['u3']);
+    expect(result.content[0].text).toContain('Post ID: p1');
+    expect(result.content[0].text).toContain('Author: @carol');
   });
 });
 
@@ -125,6 +322,31 @@ describe('threadTools handlers', () => {
     const tool = findTool(threadTools, 'list_threads');
     await tool.handler(client, { team_id: 't1' }, userId);
     expect(client.getUserThreads).toHaveBeenCalledWith(userId, 't1');
+  });
+
+  it('list_threads normalizes a null thread collection before formatting', async () => {
+    vi.mocked(client.getUserThreads).mockResolvedValue({
+      threads: null,
+      total: 0,
+      total_unread_threads: 0,
+      total_unread_mentions: 0,
+    });
+
+    const tool = findTool(threadTools, 'list_threads');
+    const result = await tool.handler(client, { team_id: 't1' }, userId);
+
+    expect(result.content[0].text).toBe('No threads found.');
+  });
+
+  it('list_threads accepts a legacy bare-array response', async () => {
+    const legacyClient = createMockClient({
+      getUserThreads: vi.fn().mockResolvedValue([]),
+    });
+
+    const tool = findTool(threadTools, 'list_threads');
+    const result = await tool.handler(legacyClient, { team_id: 't1' }, userId);
+
+    expect(result.content[0].text).toBe('No threads found.');
   });
 
   it('get_thread_stats calls getThreadsStats', async () => {
